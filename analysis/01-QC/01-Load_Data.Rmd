@@ -1,0 +1,168 @@
+---
+title: "Quality Control for scRNA and scATAC seq data"
+subtitle: "Load and Merge the data"
+author: "Ximing Ran"
+date: "2025-03-14"
+output:
+  pdf_document:
+    toc: true
+    toc_depth: 3
+    number_sections: false
+  html_document:
+    # code_folding: hide
+    toc: true
+    toc_float: true
+hitheme: tomorrow
+highlighter: highlight.js
+
+---
+
+```{r setup, include=FALSE}
+# load libraries
+library(tidyverse)
+library(knitr)
+set.seed(2025)
+
+knitr::opts_chunk$set(
+  # echo = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 9,
+  fig.height = 4,
+  fig.path = "result/01-QC/"
+)
+
+theme_set(theme_bw() + theme(legend.position = "bottom"))
+knitr::kable(head(mtcars[, 1:4]), "simple")
+```
+
+```{r}
+library(tibble)
+library(tidyr)
+library(dplyr)
+library(rtracklayer)
+library(dplyr)
+library(Seurat)
+library(Signac)
+library(EnsDb.Hsapiens.v86)
+library(ggplot2)
+library(cowplot)
+library(simspec)
+library(cowplot)
+library(AnnotationHub)
+
+```
+
+
+
+```{r local_function_load}
+# load function from local files
+
+```
+
+
+```{r local_reference_load}
+# load function from local files
+load(here::here("data","reference","annotations.rdata")) # load the annotations
+
+```
+
+
+\newpage
+
+# 1. Read the Raw Data
+
+In this section, we will read the raw data from the cellranger-arc output files. We have 4 samples: PSZ-6, TSC-tube, TSC-edge, and CTRL. We will rename the samples as PSZ, TSC-tube, TSC-edge, and TSC-outside, respectively. 
+```{r load_raw_data_TSC-CTRL}
+options(Seurat.object.assay.version = "v3")
+
+counts.psz <- Read10X_h5(here::here("data","raw-data", "cellrange-arc-out","PSZ-6","filtered_feature_bc_matrix.h5"))
+seurat.psz <- CreateSeuratObject(counts = counts.psz$`Gene Expression`,
+                                 assay = "RNA",
+                                 project = "PSZ-6")
+seurat.psz[['ATAC']] <- CreateChromatinAssay(counts = counts.psz$`Peaks`,
+                                             annotation = annotations,
+                                             fragments = here::here("data","raw-data","cellrange-arc-out","PSZ-6","atac_fragments.tsv.gz"),
+                                             sep = c(":", "-"),
+                                             genome = 'hg38')
+```
+
+```{r load_raw_data_TSC-tube}
+counts.tube <- Read10X_h5(here::here("data","raw-data", "cellrange-arc-out","TSC-tube","filtered_feature_bc_matrix.h5"))
+seurat.tube <- CreateSeuratObject(counts = counts.tube$`Gene Expression`,
+                                  assay = "RNA",
+                                  project = "TSC-tube")
+seurat.tube[['ATAC']] <- CreateChromatinAssay(counts = counts.tube$`Peaks`,
+                                              annotation = annotations,
+                                              fragments = here::here("data","raw-data","cellrange-arc-out","TSC-tube","atac_fragments.tsv.gz"),
+                                              sep = c(":", "-"),
+                                              genome = 'hg38')
+```
+
+```{r load_raw_data_TSC-edge}
+counts.edge <- Read10X_h5(here::here("data","raw-data", "cellrange-arc-out","TSC-edge","filtered_feature_bc_matrix.h5"))
+
+seurat.edge <- CreateSeuratObject(counts = counts.edge$`Gene Expression`,
+                                  assay = "RNA",
+                                  project = "TSC-edge")
+seurat.edge[['ATAC']] <- CreateChromatinAssay(counts = counts.edge$`Peaks`,
+                                              annotation = annotations,
+                                              fragments = here::here("data","raw-data","cellrange-arc-out","TSC-edge","atac_fragments.tsv.gz"),
+                                              sep = c(":", "-"),
+                                              genome = 'hg38')
+
+```
+
+```{r load_raw_data_TSC-outside}
+counts.outside <- Read10X_h5(here::here("data","raw-data", "cellrange-arc-out","CTRL","filtered_feature_bc_matrix.h5"))
+seurat.outside <- CreateSeuratObject(counts = counts.outside$`Gene Expression`,
+                                     assay = "RNA",
+                                     project = "TSC-outside")
+seurat.outside[['ATAC']] <- CreateChromatinAssay(counts = counts.outside$`Peaks`,
+                                                 annotation = annotations,
+                                                 fragments = here::here("data","raw-data","cellrange-arc-out","CTRL","atac_fragments.tsv.gz"),
+                                                 sep = c(":", "-"),
+                                                 genome = 'hg38')
+
+```
+
+# 2. Merge the samples
+
+```{r merge_sample}
+# Add unique identifiers to the cell names for each Seurat object
+seurat.psz <- RenameCells(seurat.psz, new.names = paste("psz", Cells(seurat.psz), sep = "_"))
+seurat.tube <- RenameCells(seurat.tube, new.names = paste("tube", Cells(seurat.tube), sep = "_"))
+seurat.edge <- RenameCells(seurat.edge, new.names = paste("edge", Cells(seurat.edge), sep = "_"))
+seurat.outside <- RenameCells(seurat.outside, new.names = paste("outside", Cells(seurat.outside), sep = "_"))
+
+# Now merge the Seurat objects
+seurat <- merge(seurat.psz, y = list(seurat.tube, seurat.edge, seurat.outside))
+
+# remake the peaks link for the
+peaks <- reduce(unlist(as(c(seurat.psz@assays$ATAC@ranges,
+                            seurat.tube@assays$ATAC@ranges,
+                            seurat.edge@assays$ATAC@ranges,
+                            seurat.outside@assays$ATAC@ranges),
+                            "GRangesList")))
+peakwidths <- width(peaks)
+peaks <- peaks[peakwidths < 10000 & peakwidths > 20]
+
+counts_atac_merged <- FeatureMatrix(seurat@assays$ATAC@fragments,
+                                    features = peaks,
+                                    cells = colnames(seurat))
+seurat[['ATAC']] <- CreateChromatinAssay(counts_atac_merged,
+                                         fragments = seurat@assays$ATAC@fragments,
+                                         annotation = seurat@assays$ATAC@annotation,
+                                         sep = c(":","-"),
+                                         genome = "hg38")
+
+save(seurat, file = here::here("data","processed-data","seurat-merged.rdata"))
+```
+
+
+
+\newpage
+```{r}
+sessionInfo()
+```
+
