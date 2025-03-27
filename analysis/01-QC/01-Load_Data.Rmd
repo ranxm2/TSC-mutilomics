@@ -2,7 +2,7 @@
 title: "Quality Control for scRNA and scATAC seq data"
 subtitle: "Load and Merge the data"
 author: "Ximing Ran"
-date: "2025-03-14"
+date: "2025-03-15"
 output:
   pdf_document:
     toc: true
@@ -76,51 +76,62 @@ In this section, we will read the raw data from the cellranger-arc output files.
 ```{r load_raw_data_TSC-CTRL}
 options(Seurat.object.assay.version = "v3")
 
-counts.psz <- Read10X_h5(here::here("data","raw-data", "cellrange-arc-out","PSZ-6","filtered_feature_bc_matrix.h5"))
+counts.psz <- Read10X_h5(here::here("data","raw-data", "cellrange-arc-out",
+                                    "PSZ-6","filtered_feature_bc_matrix.h5"))
 seurat.psz <- CreateSeuratObject(counts = counts.psz$`Gene Expression`,
                                  assay = "RNA",
                                  project = "PSZ-6")
+fragments_path <- here::here("data","raw-data","cellrange-arc-out",
+                             "PSZ-6","atac_fragments.tsv.gz")
 seurat.psz[['ATAC']] <- CreateChromatinAssay(counts = counts.psz$`Peaks`,
                                              annotation = annotations,
-                                             fragments = here::here("data","raw-data","cellrange-arc-out","PSZ-6","atac_fragments.tsv.gz"),
+                                             fragments = fragments_path,
                                              sep = c(":", "-"),
                                              genome = 'hg38')
 ```
 
 ```{r load_raw_data_TSC-tube}
-counts.tube <- Read10X_h5(here::here("data","raw-data", "cellrange-arc-out","TSC-tube","filtered_feature_bc_matrix.h5"))
+counts.tube <- Read10X_h5(here::here("data","raw-data", "cellrange-arc-out",
+                                     "TSC-tube","filtered_feature_bc_matrix.h5"))
 seurat.tube <- CreateSeuratObject(counts = counts.tube$`Gene Expression`,
                                   assay = "RNA",
                                   project = "TSC-tube")
+fragments_path <- here::here("data","raw-data","cellrange-arc-out",
+                             "TSC-tube","atac_fragments.tsv.gz")
 seurat.tube[['ATAC']] <- CreateChromatinAssay(counts = counts.tube$`Peaks`,
                                               annotation = annotations,
-                                              fragments = here::here("data","raw-data","cellrange-arc-out","TSC-tube","atac_fragments.tsv.gz"),
+                                              fragments = fragments_path,
                                               sep = c(":", "-"),
                                               genome = 'hg38')
 ```
 
 ```{r load_raw_data_TSC-edge}
-counts.edge <- Read10X_h5(here::here("data","raw-data", "cellrange-arc-out","TSC-edge","filtered_feature_bc_matrix.h5"))
-
+counts.edge <- Read10X_h5(here::here("data","raw-data", "cellrange-arc-out",
+                                     "TSC-edge","filtered_feature_bc_matrix.h5"))
 seurat.edge <- CreateSeuratObject(counts = counts.edge$`Gene Expression`,
                                   assay = "RNA",
                                   project = "TSC-edge")
+fragments_path <- here::here("data","raw-data","cellrange-arc-out",
+                             "TSC-edge","atac_fragments.tsv.gz")
 seurat.edge[['ATAC']] <- CreateChromatinAssay(counts = counts.edge$`Peaks`,
                                               annotation = annotations,
-                                              fragments = here::here("data","raw-data","cellrange-arc-out","TSC-edge","atac_fragments.tsv.gz"),
+                                              fragments = fragments_path,
                                               sep = c(":", "-"),
                                               genome = 'hg38')
 
 ```
 
 ```{r load_raw_data_TSC-outside}
-counts.outside <- Read10X_h5(here::here("data","raw-data", "cellrange-arc-out","CTRL","filtered_feature_bc_matrix.h5"))
+counts.outside <- Read10X_h5(here::here("data","raw-data","cellrange-arc-out",
+                                        "CTRL","filtered_feature_bc_matrix.h5"))
 seurat.outside <- CreateSeuratObject(counts = counts.outside$`Gene Expression`,
                                      assay = "RNA",
                                      project = "TSC-outside")
+fragments_path <- here::here("data","raw-data","cellrange-arc-out",
+                             "CTRL","atac_fragments.tsv.gz")
 seurat.outside[['ATAC']] <- CreateChromatinAssay(counts = counts.outside$`Peaks`,
                                                  annotation = annotations,
-                                                 fragments = here::here("data","raw-data","cellrange-arc-out","CTRL","atac_fragments.tsv.gz"),
+                                                 fragments = fragments_path,
                                                  sep = c(":", "-"),
                                                  genome = 'hg38')
 
@@ -130,10 +141,15 @@ seurat.outside[['ATAC']] <- CreateChromatinAssay(counts = counts.outside$`Peaks`
 
 ```{r merge_sample}
 # Add unique identifiers to the cell names for each Seurat object
-seurat.psz <- RenameCells(seurat.psz, new.names = paste("psz", Cells(seurat.psz), sep = "_"))
-seurat.tube <- RenameCells(seurat.tube, new.names = paste("tube", Cells(seurat.tube), sep = "_"))
-seurat.edge <- RenameCells(seurat.edge, new.names = paste("edge", Cells(seurat.edge), sep = "_"))
-seurat.outside <- RenameCells(seurat.outside, new.names = paste("outside", Cells(seurat.outside), sep = "_"))
+seurat.psz <- RenameCells(seurat.psz, 
+                          new.names = paste("psz", Cells(seurat.psz), sep = "_"))
+seurat.tube <- RenameCells(seurat.tube, 
+                           new.names = paste("tube", Cells(seurat.tube), sep = "_"))
+seurat.edge <- RenameCells(seurat.edge, 
+                           new.names = paste("edge", Cells(seurat.edge), sep = "_"))
+seurat.outside <- RenameCells(seurat.outside, 
+                              new.names = paste("outside", 
+                                                Cells(seurat.outside), sep = "_"))
 
 # Now merge the Seurat objects
 seurat <- merge(seurat.psz, y = list(seurat.tube, seurat.edge, seurat.outside))
@@ -155,8 +171,8 @@ seurat[['ATAC']] <- CreateChromatinAssay(counts_atac_merged,
                                          annotation = seurat@assays$ATAC@annotation,
                                          sep = c(":","-"),
                                          genome = "hg38")
-
-save(seurat, file = here::here("data","processed-data","seurat-merged.rdata"))
+save(seurat, file = here::here("data","processed-data","seurat-merged_2025-03-15.rdata"))
+# save(seurat, file = here::here("data","processed-data","seurat-merged_2025-03-14.rdata"))
 ```
 
 
