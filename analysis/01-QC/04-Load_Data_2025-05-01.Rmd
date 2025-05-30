@@ -1,0 +1,236 @@
+---
+title: "Quality Control for scRNA and scATAC seq data"
+subtitle: "Load and Merge the data"
+author: "Ximing Ran"
+date: "2025-05-01"
+output:
+  pdf_document:
+    toc: true
+    toc_depth: 3
+    number_sections: false
+  html_document:
+    # code_folding: hide
+    toc: true
+    toc_float: true
+hitheme: tomorrow
+highlighter: highlight.js
+
+---
+
+```{r setup, include=FALSE}
+# load libraries
+library(tidyverse)
+library(knitr)
+set.seed(2025)
+
+knitr::opts_chunk$set(
+  # echo = FALSE,
+  # warning = FALSE,
+  # message = FALSE,
+  fig.width = 9,
+  fig.height = 4,
+  fig.path = "./results/QC-analysis-plot/"
+)
+
+theme_set(theme_bw() + theme(legend.position = "bottom"))
+knitr::kable(head(mtcars[, 1:4]), "simple")
+```
+
+```{r}
+library(tibble)
+library(tidyr)
+library(dplyr)
+library(rtracklayer)
+library(dplyr)
+library(Seurat)
+library(Signac)
+library(EnsDb.Hsapiens.v86)
+library(ggplot2)
+library(cowplot)
+library(simspec)
+library(cowplot)
+library(AnnotationHub)
+
+```
+
+
+
+```{r local_function_load}
+# load function from local files
+
+```
+
+
+```{r local_reference_load}
+# load data from local files
+library(Signac)
+library(Seurat)
+library(EnsDb.Hsapiens.v86)
+library(BSgenome.Hsapiens.UCSC.hg38)
+
+# # This folling code only need to run once
+# annotations <- GetGRangesFromEnsDb(ensdb = EnsDb.Hsapiens.v86)
+# seqlevelsStyle(annotations) <- "UCSC"    # e.g. "chr1", "chr2", …
+# genome(annotations)       <- "hg38"
+# saveRDS(annotations, file = here::here("data","reference","annotations_ATAC_2025_05_01.rds"))
+
+
+# load the annotation from a rds file
+annotations <- readRDS(here::here("data","reference","annotations_ATAC_2025_05_01.rds"))
+
+# load(here::here("data","reference","annotations_ATAC.rdata")) # load the annotations
+
+```
+
+
+\newpage
+
+# 1. Read the Raw Data
+
+In this section, we will read the raw data from the cellranger-arc output files. We have 4 samples: PSZ-6, TSC-tube, TSC-edge, and CTRL. We will rename the samples as CTRL, TSC-tuber, TSC-edge, and TSC-outside, respectively. 
+
+
+```{r load_raw_data_TSC}
+# load data from cellranger and perform basic QC
+library(Seurat)
+library(tidyverse)
+library(data.table)
+library(scDblFinder)
+
+options(Seurat.object.assay.version = "v5")
+
+### read sample meta information
+sample_meta <-  c('CTRL', 'TSC_edge', 'TSC_tuber', 'TSC_outside')
+
+### read cellranger out into Seurat object
+lapply(1:length(sample_meta), function(i) {
+  print(i)
+  h5 <- sprintf(
+    "../../data/raw-data/cellrange-arc-out/%s/filtered_feature_bc_matrix.h5",
+    sample_meta[i])
+  print(h5)
+  
+  obj_count <- Read10X_h5(h5)
+  
+  obj <- CreateSeuratObject(
+    counts =   obj_count ,
+    project = sample_meta[i],
+     assay = "RNA"
+  )
+  fragments_path <- sprintf(
+    "../../data/raw-data/cellrange-arc-out/%s/atac_fragments.tsv.gz",
+    sample_meta[i])
+  print(fragments_path)
+  
+  
+    obj [['ATAC']] <- CreateChromatinAssay(counts =   obj_count$`Peaks`,
+                                             annotation = annotations,
+                                             fragments = fragments_path,
+                                             sep = c(":", "-"),
+                                             genome = 'hg38')
+  
+  
+  obj$group <- sample_meta[i]
+  # # add sample name to cell id
+  obj <- RenameCells(obj, add.cell.id = sample_meta[i])
+  obj
+}) -> sample_seurat_list
+names(sample_seurat_list) <- sample_meta
+
+
+```
+\newpage
+
+# 2. QC for data
+
+```{r QC, fig.height=5, fig.width=8}
+
+### Data QC
+lapply(1:length(sample_seurat_list), function(i) {
+  print(i)
+  obj <- sample_seurat_list[[i]]
+  print(sample_meta[i])
+  # show how many cells are in the object
+  print(paste0("Number of cells before QC: ", ncol(obj)))
+  obj$percent.mt <- PercentageFeatureSet(obj, pattern = "^MT-")
+  
+  # before QC plot
+  p<-VlnPlot(obj,
+          features = c("nFeature_RNA", "nCount_RNA", "percent.mt", "nCount_ATAC"),
+          ncol = 4
+  )
+  print(p)
+  ggsave(sprintf("./results/%s_before_QC.png", sample_meta[i]),p,
+         height = 5, width = 8
+  )
+  
+  # pull out the raw count matrix from your Seurat object
+  raw_counts <- obj[["RNA"]]$counts
+  
+  # build a minimal SCE
+  sce <- SingleCellExperiment(
+    assays = list(counts = raw_counts)
+  )
+  
+  # now run doublet detection
+  sce <- scDblFinder(sce)
+  
+
+  assertthat::are_equal(colnames(sce), colnames(obj))
+  obj$scDblFinder.class <- sce$scDblFinder.class
+  
+  # QC for RNA
+  obj <- subset(obj,
+                subset =
+                  nFeature_RNA > 200 &
+                  nFeature_RNA < 10000 &
+                  percent.mt < 20 &
+                  scDblFinder.class == "singlet"
+  )
+  
+  # QC for ATAC 
+  # REF: https://satijalab.org/seurat/archive/v3.1/atacseq_integration_vignette
+  obj <- subset(  obj , subset = nCount_ATAC > 30 &
+                  nCount_ATAC < 10000)
+  
+  # after QC plot
+  p<-VlnPlot(obj,
+          features = c("nFeature_RNA", "nCount_RNA", "percent.mt", "nCount_ATAC"),
+          ncol = 4
+  )
+  print(p)
+  
+  # show how many cells are left after QC
+  print(paste0("Number of cells after QC: ", ncol(obj)))
+  ggsave(sprintf("./results/%s_after_QC.png", sample_meta[i]),p,
+         height = 5, width = 8
+  )
+  obj
+}) -> sample_seurat_list
+
+names(sample_seurat_list) <- sample_meta
+
+
+
+# save clean data
+saveRDS(sample_seurat_list,
+        file = here::here("data", "processed-data",
+                          "sample_seurat_list_2025-05-01.rds"),
+        compress = F,
+)
+
+saveRDS(sample_meta,
+        file = here::here("data", "processed-data",
+                          "sample_meta_2025-05-01.rds"),
+)
+
+
+```
+
+
+
+\newpage
+```{r}
+sessionInfo()
+```
+

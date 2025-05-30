@@ -1,0 +1,251 @@
+---
+title: "Cell Type Anotation"
+subtitle: "Cell type annotation"
+author: "Ximing Ran"
+date: "2025-05-01"
+output:
+  pdf_document:
+    toc: true
+    toc_depth: 3
+    number_sections: false
+  html_document:
+    # code_folding: hide
+    toc: true
+    toc_float: true
+hitheme: tomorrow
+highlighter: highlight.js
+
+---
+
+```{r setup, include=FALSE}
+# load libraries
+library(tidyverse)
+library(knitr)
+set.seed(2025)
+
+knitr::opts_chunk$set(
+  # echo = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 9,
+  fig.height = 4,
+  fig.path = "result/02-Clustering-v2/Clustering_plot/"
+)
+
+theme_set(theme_bw() + theme(legend.position = "bottom"))
+knitr::kable(head(mtcars[, 1:4]), "simple")
+```
+
+```{r}
+library(tibble)
+library(tidyr)
+library(dplyr)
+library(rtracklayer)
+library(dplyr)
+library(Seurat)
+library(Signac)
+library(EnsDb.Hsapiens.v86)
+library(ggplot2)
+library(cowplot)
+library(simspec)
+library(cowplot)
+library(AnnotationHub)
+library(Seurat)
+library(tidyverse)
+library(openxlsx)
+library(dplyr)
+library(conflicted)
+library(harmony)
+library(data.table)
+library(pheatmap)
+library(ggplot2)
+library(patchwork)
+
+conflict_prefer("filter", "dplyr")  # Prefer dplyr's filter()
+conflict_prefer("lag", "dplyr")     # Prefer dplyr's lag()
+
+```
+
+
+
+```{r local_function_load}
+# load function from local files
+source(here::here("source", "sc_functions.R"))
+```
+
+
+
+
+\newpage
+
+# 1. Read the merged Data
+```{r load_merged_data}
+seurat_obj <- readRDS(here::here("data", "processed-data", "seurat-cluster_2025-05-01.rds"))
+```
+
+\newpage
+# 2. Find Maker Genes
+
+```{r clustering_res, fig.width=8, fig.height=6}
+# load cell marker database
+# http://bio-bigdata.hrbmu.edu.cn/CellMarker/CellMarker_download.html
+# http://117.50.127.228/CellMarker/CellMarker_download.html
+# markers_db <- read.xlsx("http://117.50.127.228/CellMarker/CellMarker_download_files/file/Cell_marker_Seq.xlsx",
+                        # check.names = F, sheet = 1)
+
+markers_db <- read.xlsx(here::here("data","reference", "Cell_marker_Seq.xlsx"),
+                         check.names = F, sheet = 1)
+markers_db %>% filter(
+  tissue_type == "Brain",
+  species == "Human",cancer_type == "Normal") -> markers_db
+markers_db %>% group_by(cell_name) %>%
+  summarise(total = n()) -> cell_type_marker_count
+
+
+```
+
+\newpage
+
+
+```{r find_markers}
+res <- 0.1
+Idents(seurat_obj) <- seurat_obj$RNA_snn_res.0.1
+cluster_marker<-FindAllMarkers(seurat_obj,group.by = sprintf("RNA_snn_res.%s", res),
+                               only.pos = T, densify = T,
+                               random.seed =2025)
+# save it to the csv
+write.csv(cluster_marker, file = sprintf("result/02-Clustering-v2/cluster_marker_resolution_%s.csv", res), row.names = F)
+
+table(cluster_marker$cluster)
+
+cluster_marker %>%
+  filter(p_val_adj < 0.05, 
+         avg_log2FC > 0) %>%
+  group_by(cluster) %>%
+  slice_max(avg_log2FC, n = 1000) -> sig_markers
+
+
+  lapply(unique(cluster_marker$cluster), function(cl){
+  # cl <- 0
+  print(cl)
+  sig_markers %>%
+    filter(cluster == cl) %>%
+    arrange(desc(avg_log2FC)) -> cl_marker_genes
+  
+  markers_db %>%
+    filter(Symbol %in% cl_marker_genes$gene) %>%
+    left_join(cl_marker_genes, by = c("Symbol" = "gene")) %>%
+    group_by(cell_name) %>%
+    summarise(n = n(),
+              markers = paste(unique(Symbol), collapse = ",")) %>%
+    left_join(cell_type_marker_count) %>%
+    mutate(proportion = n / total) %>%
+    arrange(desc(proportion)) -> res_anno
+  res_anno$cluster <- cl
+  
+  # add gene logfc to the annotation res
+  print("adding marker gene logfc....")
+  
+  sapply(res_anno$markers, function(genes){
+    genes <- genes %>% str_split(",", simplify = T) %>% .[1,]
+    cluster_marker %>%
+      mutate(avg_log2FC = round(avg_log2FC, 4)) %>%
+      filter(cluster == cl,
+             gene %in% genes) %>%
+      arrange(match(gene, genes)) %>%
+      dplyr::select(avg_log2FC) %>%
+      unlist() %>% paste0(., collapse = ",")
+  }) -> res_anno$log2FC
+  
+  res_anno$log2FC %>% sapply(function(x){
+    str_split(x ,",", simplify = T) %>% .[1,] %>%
+      as.numeric() %>% sum()
+  }) -> res_anno$log2FC_sum
+  
+  # create a new column for avg_log2FC
+  res_anno$log2FC %>% sapply(function(x){
+    str_split(x ,",", simplify = T) %>% .[1,] %>%
+      as.numeric() %>% mean()
+  }) -> res_anno$avg_log2FC
+  
+  # add gene avg expr to the annotation res
+  print("adding marker gene expr....")
+ 
+  res_anno %>%
+    arrange(desc(proportion))
+}) -> cell.type.annotation
+  
+    names(cell.type.annotation) <- paste0("cluster ", unique(cluster_marker$cluster))
+  openxlsx::write.xlsx(
+    cell.type.annotation,
+    file = sprintf("./result/02-Clustering-v2/cell_type_annotation_resolution_%s.xlsx", res)
+  )
+
+```
+
+
+```{r find_markers_plot, fig.width=12, fig.height=12}
+
+gene <- "TET2"
+Idents(seurat_obj) <- seurat_obj$RNA_snn_res.0.1
+seurat_obj$seurat_clusters <- seurat_obj$RNA_snn_res.0.1
+file_path <- sprintf("result/02-Clustering-v2/check_res_%s/Gene_%s", res, gene)
+plot_sc_feature(seurat_obj, res = res, features = gene, save = TRUE,
+                      group_by = "seurat_clusters",
+                      group_by_label = sprintf("seurat_clusters_%s", res),
+                      reduction_label = "umap",
+                      output_prefix = file_path)
+```
+
+```{r find_markers_plot, fig.width=12, fig.height=12}
+
+gene_list_raw <- "RBFOX1,VIM,BEX3,RBFOX3,GRIN1,SYT1,SLC1A2,APOE,GRIN2B,NRG1,HTR2C"
+gene_list <- gene_list_raw %>% str_split(",", simplify = T) %>% .[1,]
+
+for (gene in gene_list) {
+  print(gene)
+  file_path <- sprintf("result/02-Clustering-v2/check_res_%s/Gene_%s", res, gene)
+  p<-plot_sc_feature(seurat_obj, res = res, features = gene, save = TRUE,
+                  group_by = "seurat_clusters",
+                  group_by_label = sprintf("seurat_clusters_%s", res),
+                  reduction_label = "umap",
+                  output_prefix = file_path)
+  print(p)
+}
+
+```
+
+
+
+
+
+## Check the cluster result
+
+```{r cluser_plot, fig.width=12, fig.height=12}
+
+# UMAP for the res 0.1
+
+Idents(seurat_obj) <- seurat_obj$seurat_clusters
+
+library(ggplot2)
+DimPlot(
+  seurat_obj, reduction = "umap", group.by = "seurat_clusters",
+  label = TRUE, pt.size = 0.5
+) +
+  scale_color_brewer(palette = "Dark2") +
+  ggtitle("UMAP for the res 0.1") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  theme(legend.position = "none") +
+  theme(axis.text.x=element_blank(), axis.text.y=element_blank()) +
+  theme(axis.ticks=element_blank()) +
+  theme(panel.grid.major=element_blank(), panel.grid.minor=element_blank())
+```
+
+
+
+\newpage
+Session Information
+```{r session_info}
+sessionInfo()
+```
+

@@ -171,8 +171,12 @@ seurat[['ATAC']] <- CreateChromatinAssay(counts_atac_merged,
                                          annotation = seurat@assays$ATAC@annotation,
                                          sep = c(":","-"),
                                          genome = "hg38")
-save(seurat, file = here::here("data","processed-data","seurat-merged_2025-03-15.rdata"))
+# save(seurat, file = here::here("data","processed-data","seurat-merged_2025-03-15.rdata"))
 # save(seurat, file = here::here("data","processed-data","seurat-merged_2025-03-14.rdata"))
+
+
+saveRDS(seurat, here::here("data", "processed-data", "seurat-merged_2025-03-15.rds"))
+
 ```
 
 

@@ -1,0 +1,147 @@
+---
+title: "Cell Type Anotation"
+subtitle: "Cell type annotation with clustering"
+author: "Ximing Ran"
+date: "2025-04-09"
+output:
+  pdf_document:
+    toc: true
+    toc_depth: 3
+    number_sections: false
+  html_document:
+    # code_folding: hide
+    toc: true
+    toc_float: true
+hitheme: tomorrow
+highlighter: highlight.js
+
+---
+
+```{r setup, include=FALSE}
+# load libraries
+library(tidyverse)
+library(knitr)
+set.seed(2025)
+
+knitr::opts_chunk$set(
+  # echo = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 9,
+  fig.height = 4,
+  fig.path = "result/02-Azimuth/Analysis_plot/"
+)
+
+theme_set(theme_bw() + theme(legend.position = "bottom"))
+knitr::kable(head(mtcars[, 1:4]), "simple")
+```
+
+```{r}
+library(tibble)
+library(tidyr)
+library(dplyr)
+library(rtracklayer)
+library(dplyr)
+library(Seurat)
+library(Signac)
+library(EnsDb.Hsapiens.v86)
+library(ggplot2)
+library(cowplot)
+library(simspec)
+library(cowplot)
+library(AnnotationHub)
+library(Seurat)
+library(tidyverse)
+library(openxlsx)
+library(dplyr)
+library(conflicted)
+library(harmony)
+library(data.table)
+library(pheatmap)
+library(ggplot2)
+library(patchwork)
+
+conflict_prefer("filter", "dplyr")  # Prefer dplyr's filter()
+conflict_prefer("lag", "dplyr")     # Prefer dplyr's lag()
+
+```
+
+
+
+```{r local_function_load}
+# load function from local files
+
+```
+
+
+```{r local_reference_load}
+# load function from local files
+load(here::here("data","reference","annotations.rdata")) # load the annotations
+
+```
+
+
+\newpage
+
+# 1. Load the clustered Seurat object
+
+```{r load_cluter_data, fig.width=12, fig.height=10}
+seurat_obj <- readRDS(here::here("data", "processed-data", "seurat-cluster_2025-04-09.rds"))
+
+
+seurat_obj$seurat_clusters<- seurat_obj[[sprintf("RNA_snn_res.%s", res)]]
+p <- DimPlot(seurat_obj, 
+             reduction = "umap_harmony", 
+             group.by = "seurat_clusters", label = TRUE) +
+  ggtitle(paste("Resolution:", res)) +
+  theme(legend.position = "none")
+
+print(p)
+
+
+
+ct_label <- read.csv(here::here("data", "processed-data", "ct_mannual_2025-04-09.csv"), row.names = 1)
+
+gene_list_clean <- unlist(strsplit(gene_list, ","))           # Split by comma
+gene_list_clean <- unique(trimws(gene_list_clean))            # Trim whitespace, remove duplicates
+gene_list_clean <- gene_list_clean[gene_list_clean != ""]  
+
+for(index in 1:length(gene_list_clean )){
+
+gene <- gene_list_clean[index]
+gene<- "SLC17A6"
+file_path <- sprintf("./result/01-Clustering/res_0.2/%02d_%s", index, gene)
+p <- plot_sc_feature(seurat_obj, res = 0.2, features = gene, save = FALSE,
+                      group_by = "seurat_clusters",
+                      group_by_label = "Resolution:0.2",
+                      reduction_label = "umap_harmony",
+                     output_prefix =file_path)
+
+
+}
+
+
+
+
+
+
+
+
+
+
+```
+
+\newpage
+
+
+
+
+
+
+
+\newpage
+Session Information
+```{r session_info}
+sessionInfo()
+```
+

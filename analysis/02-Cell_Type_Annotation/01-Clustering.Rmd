@@ -1,0 +1,141 @@
+---
+title: "Cell Type Anotation"
+subtitle: "Cell type annotation with clustering"
+author: "Ximing Ran"
+date: "2025-04-09"
+output:
+  pdf_document:
+    toc: true
+    toc_depth: 3
+    number_sections: false
+  html_document:
+    # code_folding: hide
+    toc: true
+    toc_float: true
+hitheme: tomorrow
+highlighter: highlight.js
+
+---
+
+```{r setup, include=FALSE}
+# load libraries
+library(tidyverse)
+library(knitr)
+set.seed(2025)
+
+knitr::opts_chunk$set(
+  # echo = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 9,
+  fig.height = 4,
+  fig.path = "result/01-Clustering/Analysis_plot/"
+)
+
+theme_set(theme_bw() + theme(legend.position = "bottom"))
+knitr::kable(head(mtcars[, 1:4]), "simple")
+```
+
+```{r}
+library(tibble)
+library(tidyr)
+library(dplyr)
+library(rtracklayer)
+library(dplyr)
+library(Seurat)
+library(Signac)
+library(EnsDb.Hsapiens.v86)
+library(ggplot2)
+library(cowplot)
+library(simspec)
+library(cowplot)
+library(AnnotationHub)
+library(Seurat)
+library(tidyverse)
+library(openxlsx)
+library(dplyr)
+library(conflicted)
+library(harmony)
+library(data.table)
+library(pheatmap)
+library(ggplot2)
+library(patchwork)
+
+conflict_prefer("filter", "dplyr")  # Prefer dplyr's filter()
+conflict_prefer("lag", "dplyr")     # Prefer dplyr's lag()
+
+```
+
+
+
+```{r local_function_load}
+# load function from local files
+
+```
+
+
+```{r local_reference_load}
+# load function from local files
+load(here::here("data","reference","annotations.rdata")) # load the annotations
+
+```
+
+
+\newpage
+
+# 1. Read the merged Data
+
+
+```{r load_merged_data}
+seurat_obj <- readRDS(here::here("data", "processed-data", "seurat-merged_2025-03-15.rds"))
+
+#### Dimension reduction ######
+DefaultAssay(seurat_obj) <- "RNA"
+seurat_obj <- NormalizeData(seurat_obj) 
+seurat_obj <- FindVariableFeatures(seurat_obj,nfeatures = 3000)
+seurat_obj <- ScaleData(seurat_obj)
+seurat_obj <- RunPCA(seurat_obj, npcs = 50) 
+seurat_obj <- RunUMAP(seurat_obj, dims = 1:20, reduction.name = "umap_rna", reduction.key = "UMAPRNA_")
+
+seurat_obj <- RunHarmony(seurat_obj, group.by.vars = "orig.ident")
+seurat_obj <- RunUMAP(seurat_obj, reduction = "harmony", dims = 1:20, 
+                  reduction.name = "umap_harmony", reduction.key = "UMAPH_")
+
+```
+
+\newpage
+# 2. Culstering
+
+```{r clustering_res, fig.width=8, fig.height=6}
+#### Run clustering res from 0.1 to 0.5 ####
+for (res in seq(0.1, 0.5, by = 0.1)) {
+  seurat_obj <- FindNeighbors(seurat_obj, reduction = "harmony", dims = 1:50)
+  seurat_obj <- FindClusters(seurat_obj, resolution = res)
+
+  # plot the UMAP with the cluster labels
+  # seurat_obj$seurat_clusters<- seurat_obj[[sprintf("RNA_snn_res.%s", res)]]
+  p <- DimPlot(seurat_obj, 
+               reduction = "umap_harmony", 
+               group.by = "seurat_clusters", label = TRUE) +
+    ggtitle(paste("Resolution:", res)) +
+    theme(legend.position = "none")
+  
+  print(p)
+  ggsave(paste0("result/01-Clustering/umap_plot/umap_harmony_res_", res, ".pdf"), plot = p, width = 8, height = 6)
+  ggsave(paste0("result/01-Clustering/umap_plot/umap_harmony_res_", res, ".png"), plot = p, width = 8, height = 6)
+}
+
+# save the seurat object
+saveRDS(seurat_obj, file = here::here("data", "processed-data", "seurat-cluster_2025-04-09.rds"))
+
+```
+
+
+
+
+\newpage
+Session Information
+```{r session_info}
+sessionInfo()
+```
+
